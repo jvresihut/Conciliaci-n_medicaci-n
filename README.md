@@ -1,16 +1,15 @@
-# React + Vite
+# Conciliación de medicación — estilo Claude y CIMA real
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Proyecto Vite + React + Tailwind CSS v3. Mantiene la interfaz original de Claude y la función de Vercel `api/cima/medicamentos.js`.
 
-Currently, two official plugins are available:
+## Instalación en GitHub / Vercel
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Descomprime y coloca **el contenido** de esta carpeta en la raíz del repositorio (donde está `package.json`). No subas una carpeta adicional contenedora.
+2. En GitHub, conserva `api/cima/medicamentos.js` en raíz. Sustituye/añade `package.json`, `postcss.config.js`, `tailwind.config.js`, `src/App.jsx`, `src/main.jsx`, `src/style.css`, `index.html`, `vite.config.js`.
+3. En Vercel: Framework Vite, Build Command `npm run build`, Output Directory `dist`, Root Directory `./`.
+4. Si hay `package-lock.json` anterior, regénéralo mediante `npm install` y súbelo; Vercel instalará las dependencias según `package.json`.
+5. Haz commit y espera el redeploy. Comprueba búsqueda de medicamentos y estilos azules.
 
-## React Compiler
+**Qué se corrige**: los estilos de Claude usan clases Tailwind (`bg-blue-900`, `rounded-lg`, etc.). Si Tailwind no se configura, el navegador ignora esas clases y el diseño queda plano. Este proyecto incluye Tailwind 3, PostCSS y su hoja de entrada.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+**Limitaciones originales conservadas**: `window.storage` no ofrece persistencia web convencional; llamada IA de Anthropic original sin credenciales reales. No cargar datos de pacientes identificables sin proteger acceso, backend y tratamiento de datos.
