@@ -17,58 +17,35 @@ const PERMISOS_LABELS = {
   generarRecomendaciones: "Generar recomendaciones IA"
 };
 
-// ── FALLBACK LOCAL ────────────────────────────────────────────────────────────
-const FARMACOS_FALLBACK = [
-  "Ácido acetilsalicílico","Ácido fólico","Ácido valproico","Alopurinol","Amiodarona",
-  "Amlodipino","Amoxicilina","Amoxicilina/Clavulánico","Atorvastatina","Azitromicina",
-  "Azatioprina","Bisoprolol","Budesonida","Carvedilol","Ciprofloxacino","Clopidogrel",
-  "Colchicina","Dapagliflozina","Digoxina","Diltiazem","Doxazosina","Enalapril",
-  "Espironolactona","Esomeprazol","Ezetimiba","Fentanilo","Fluoxetina","Furosemida",
-  "Gabapentina","Glibenclamida","Hidroclorotiazida","Hidroxicloroquina","Ibuprofeno",
-  "Indapamida","Insulina glargina","Insulina lispro","Irbesartán","Ivabradina",
-  "Lansoprazol","Levetiracetam","Levofloxacino","Levotiroxina","Linagliptina",
-  "Lisinopril","Lorazepam","Losartán","Metformina","Metoprolol","Metronidazol",
-  "Midazolam","Morfina","Nitroglicerina","Omeprazol","Ondansetrón","Oxicodona",
-  "Paracetamol","Pantoprazol","Paroxetina","Pregabalina","Prednisona","Propranolol",
-  "Quetiapina","Ramipril","Rivaroxabán","Rosuvastatina","Sacubitrilo/Valsartán",
-  "Sertralina","Sitagliptina","Solifenacina","Telmisartán","Torasemida","Tramadol",
-  "Valsartán","Venlafaxina","Verapamilo","Warfarina","Zolpidem","Empagliflozina",
-  "Apixabán","Dabigatrán","Edoxabán","Colecalciferol","Calcio","Hierro","Metotrexato",
-  "Ciclosporina","Tacrolimus","Micofenolato","Tiotropio","Salmeterol/Fluticasona",
-  "Montelukast","Ipratropio","Salbutamol","Darbepoyetina","Eritropoyetina","Alendronato"
-].map(nombre => ({ nregistro: nombre, nombre, principioActivo:"—", atc:"—", formaFarmaceutica:"—", dosis:"—", presentaciones:"—" }));
+// ── API OFICIAL CIMA (AEMPS) A TRAVÉS DE PROXY PROPIO ────────────────────────
+// El proxy /api/cima está configurado en vite.config.js (desarrollo)
+// y en server.mjs (producción). No se utilizan proxys públicos ni listados inventados.
+const CIMA_ENDPOINT = "/api/cima/medicamentos";
 
-// ── CIMA API CON MÚLTIPLES PROXYS Y FALLBACK ──────────────────────────────────
-const CIMA_PROXIES = [
-  "https://corsproxy.io/?url=",
-  "https://api.allorigins.win/raw?url=",
-  "https://thingproxy.freeboard.io/fetch/"
-];
-const CIMA_BASE = "https://cima.aemps.es/cima/rest";
+const nombreDe = x => typeof x === "string" ? x : (x?.nombre || "");
+const textoLista = (valor) => Array.isArray(valor)
+  ? valor.map(nombreDe).filter(Boolean).join(", ") || "—"
+  : (typeof valor === "string" && valor.trim() ? valor : "—");
 
-async function buscarCIMA(query) {
-  const cimaUrl = `${CIMA_BASE}/medicamentos?nombre=${encodeURIComponent(query)}&pageSize=10`;
-  let lastErr;
-  for (const proxy of CIMA_PROXIES) {
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${proxy}${encodeURIComponent(cimaUrl)}`, { signal: controller.signal });
-      clearTimeout(tid);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return (data.resultados || []).map(m => ({
-        nregistro:        m.nregistro || "",
-        nombre:           m.nombre    || "",
-        principioActivo:  (m.pactivos || []).map(p => p.nombre).join(", ") || "—",
-        atc:              (m.pactivos || []).map(p => p.codAtc).filter(Boolean).join(", ") || "—",
-        formaFarmaceutica:(m.formaFarmaceutica?.nombre) || "—",
-        dosis:            m.dosis || "—",
-        presentaciones:   (m.presentaciones || []).map(p => p.nombre).join(" | ") || "—",
-      }));
-    } catch (e) { lastErr = e; }
+async function buscarCIMA(query, signal) {
+  const params = new URLSearchParams({ nombre: query.trim(), pagina: "1" });
+  const res = await fetch(`${CIMA_ENDPOINT}?${params}`, {
+    method: "GET", headers: { Accept: "application/json" }, signal
+  });
+  if (!res.ok) throw new Error(`Error de CIMA: HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || !Array.isArray(data.resultados)) {
+    throw new Error("Respuesta inesperada de la API de CIMA");
   }
-  throw lastErr;
+  return data.resultados.slice(0, 10).map(m => ({
+    nregistro: String(m.nregistro || ""),
+    nombre: m.nombre || "",
+    principioActivo: textoLista(m.pactivos),
+    atc: textoLista(m.atcs || m.atc || []),
+    formaFarmaceutica: nombreDe(m.formaFarmaceutica) || "—",
+    dosis: m.dosis || "—",
+    presentaciones: textoLista(m.presentaciones)
+  })).filter(m => m.nregistro && m.nombre);
 }
 
 const CHECKLIST_ITEMS = [
@@ -100,26 +77,39 @@ function FarmacoSearch({ label, selected, onAdd, onRemove }) {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [errorSearch, setErrorSearch] = useState("");
   const debounceRef = useRef(null);
+  const requestRef = useRef(null);
+  const searchIdRef = useRef(0);
+
+  useEffect(() => () => {
+    clearTimeout(debounceRef.current);
+    requestRef.current?.abort();
+  }, []);
 
   const search = (val) => {
     setQ(val);
     setErrorSearch("");
     clearTimeout(debounceRef.current);
-    if (val.length < 3) { setResults([]); setOpen(false); return; }
+    requestRef.current?.abort();
+    const id = ++searchIdRef.current;
+    if (val.trim().length < 3) {
+      setResults([]); setOpen(false); setLoadingSearch(false); return;
+    }
     debounceRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      requestRef.current = controller;
       setLoadingSearch(true); setOpen(true);
       try {
-        const res = await buscarCIMA(val);
+        const res = await buscarCIMA(val, controller.signal);
+        if (id !== searchIdRef.current) return;
         setResults(res);
         setErrorSearch("");
-      } catch {
-        const local = FARMACOS_FALLBACK.filter(f =>
-          f.nombre.toLowerCase().includes(val.toLowerCase())
-        ).slice(0, 10);
-        setResults(local);
-        setErrorSearch("⚠️ CIMA no disponible — mostrando base local");
+      } catch (err) {
+        if (id !== searchIdRef.current || err.name === "AbortError") return;
+        setResults([]);
+        setErrorSearch(`⚠️ No se pudo consultar CIMA: ${err.message}`);
+      } finally {
+        if (id === searchIdRef.current) setLoadingSearch(false);
       }
-      setLoadingSearch(false);
     }, 400);
   };
 
