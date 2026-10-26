@@ -32,7 +32,14 @@ async function buscarCIMA(query, signal) {
   const res = await fetch(`${CIMA_ENDPOINT}?${params}`, {
     method: "GET", headers: { Accept: "application/json" }, signal
   });
-  if (!res.ok) throw new Error(`Error de CIMA: HTTP ${res.status}`);
+  if (!res.ok) {
+    let upstreamMessage = "";
+    try { upstreamMessage = (await res.json())?.error || ""; } catch {}
+    if (res.status === 404) {
+      throw new Error("HTTP 404: Vercel no encuentra la función /api/cima/medicamentos. Comprueba que la carpeta api/cima esté en la raíz del repositorio y despliega de nuevo.");
+    }
+    throw new Error(upstreamMessage || `Error de conexión con CIMA: HTTP ${res.status}`);
+  }
   const data = await res.json();
   if (!data || !Array.isArray(data.resultados)) {
     throw new Error("Respuesta inesperada de la API de CIMA");
@@ -40,8 +47,8 @@ async function buscarCIMA(query, signal) {
   return data.resultados.slice(0, 10).map(m => ({
     nregistro: String(m.nregistro || ""),
     nombre: m.nombre || "",
-    principioActivo: textoLista(m.pactivos),
-    atc: textoLista(m.atcs || m.atc || []),
+    principioActivo: textoLista(m.pactivos || m.principiosActivos),
+    atc: Array.isArray(m.atcs) ? m.atcs.map(x => x.codigo || x.nombre).filter(Boolean).join(", ") || "—" : textoLista(m.atc || []),
     formaFarmaceutica: nombreDe(m.formaFarmaceutica) || "—",
     dosis: m.dosis || "—",
     presentaciones: textoLista(m.presentaciones)
